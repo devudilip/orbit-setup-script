@@ -1,28 +1,34 @@
 import { ethers } from 'ethers'
 import { L3Config } from './l3ConfigType'
 import fs from 'fs'
-import { ethDeposit } from './ethDeposit'
+import { ethOrERC20Deposit } from './nativeTokenDeposit'
+import { createERC20Bridge } from './createTokenBridge'
 import { l3Configuration } from './l3Configuration'
-import { tokenBridgeDeployment } from './tokenBridgeDeployment'
 import { defaultRunTimeState, RuntimeState } from './runTimeState'
-
+import { transferOwner } from './transferOwnership'
 // Delay function
 function delay(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 function checkRuntimeStateIntegrity(rs: RuntimeState) {
-  if (!rs.l3) {
-    rs.l3 = defaultRunTimeState.l3
-  }
-  if (!rs.l2) {
-    rs.l2 = defaultRunTimeState.l2
+  if (!rs.chainId) {
+    rs.chainId = defaultRunTimeState.chainId
   }
   if (!rs.etherSent) {
     rs.etherSent = defaultRunTimeState.etherSent
   }
-  if (!rs.initializedState) {
-    rs.initializedState = defaultRunTimeState.initializedState
+  if (!rs.nativeTokenDeposit) {
+    rs.nativeTokenDeposit = defaultRunTimeState.nativeTokenDeposit
+  }
+  if (!rs.tokenBridgeDeployed) {
+    rs.tokenBridgeDeployed = defaultRunTimeState.tokenBridgeDeployed
+  }
+  if (!rs.l3config) {
+    rs.l3config = defaultRunTimeState.l3config
+  }
+  if (!rs.transferOwnership) {
+    rs.transferOwnership = defaultRunTimeState.transferOwnership
   }
 }
 
@@ -48,21 +54,29 @@ async function main() {
     rs = JSON.parse(stateRaw)
     //check integrity
     checkRuntimeStateIntegrity(rs)
-    console.log(
-      'resumeState file found, will restart from where it failed last time.'
-    )
+
+    //check if there is a new chain config
+    if (rs.chainId !== config.chainId) {
+      rs = defaultRunTimeState
+      console.log('A different chain config than last time was detected.')
+    } else {
+      console.log(
+        'resumeState file found, will restart from where it failed last time.'
+      )
+    }
   } else {
     rs = defaultRunTimeState
   }
 
+  rs.chainId = config.chainId
   // Generating providers from RPCs
   const L2Provider = new ethers.providers.JsonRpcProvider(L2_RPC_URL)
   const L3Provider = new ethers.providers.JsonRpcProvider(L3_RPC_URL)
 
-  // Checking if the L2 network is Arb Goerli
-  if ((await L2Provider.getNetwork()).chainId !== 421613) {
+  // Checking if the L2 network is the expected parent chain
+  if ((await L2Provider.getNetwork()).chainId !== config.parentChainId) {
     throw new Error(
-      'The L2 RPC URL you have provided is not for Arbitrum Goerli'
+      'The L2 RPC URL you have provided is not for the correct parent chain'
     )
   }
 
@@ -74,78 +88,98 @@ async function main() {
     /// Funding batch-poster and staker address ///
     //////////////////////////////////////////////
     if (!rs.etherSent.batchPoster) {
-      console.log(
-        'Funding batch-poster accounts on Arbitrum Goerli  with 0.3 ETH'
-      )
+      console.log('Funding batch-poster accounts on parent chain with 0.3 ETH')
       const tx1 = await signer.sendTransaction({
         to: config.batchPoster,
         value: ethers.utils.parseEther('0.3'),
       })
-      console.log(`Transaction hash on Arbitrum Goerli: ${tx1.hash}`)
+      console.log(`Transaction hash on parent chain: ${tx1.hash}`)
       const receipt1 = await tx1.wait()
       console.log(
-        `Transaction was mined in block ${receipt1.blockNumber} on Arbitrum Goerli`
+        `Transaction was mined in block ${receipt1.blockNumber} on parent chain`
       )
       rs.etherSent.batchPoster = true
     }
 
     if (!rs.etherSent.staker) {
-      console.log('Funding staker accounts on Arbitrum Goerli with 0.3 ETH')
+      console.log('Funding staker accounts on parent chain with 0.3 ETH')
       const tx2 = await signer.sendTransaction({
         to: config.staker,
         value: ethers.utils.parseEther('0.3'),
       })
-      console.log(`Transaction hash on Arbitrum Goerli: ${tx2.hash}`)
+      console.log(`Transaction hash on parent chain: ${tx2.hash}`)
       const receipt2 = await tx2.wait()
       console.log(
-        `Transaction was mined in block ${receipt2.blockNumber} on Arbitrum Goerli`
+        `Transaction was mined in block ${receipt2.blockNumber} on parent chain`
       )
       rs.etherSent.staker = true
     }
 
-    if (!rs.etherSent.deposit) {
-      ////////////////////////////////
-      /// ETH deposit to L3 /////////
-      //////////////////////////////
+    if (!rs.nativeTokenDeposit) {
+      ////////////////////////////////////////////
+      /// ETH/Native token deposit to L3 /////////
+      ////////////////////////////////////////////
       console.log(
-        'Running ethDeposit Script to Deposit ETH from Arbitrum Goerli to your account on appchain ... 💰💰💰💰💰💰'
+        'Running Orbit Chain Native token deposit to Deposit ETH or native ERC20 token from parent chain to your account on Orbit chain ... 💰💰💰💰💰💰'
       )
       const oldBalance = await L3Provider.getBalance(config.chainOwner)
-      await ethDeposit(privateKey, L2_RPC_URL, L3_RPC_URL)
+      await ethOrERC20Deposit(privateKey, L2_RPC_URL)
+      let depositCheckTime = 0
 
-      // Waiting for 30 secs to be sure that ETH deposited is received on L3
-      // Repeatedly check the balance until it changes by 1 Ether
+      // Waiting for 30 secs to be sure that ETH/Native token deposited is received on L3
+      // Repeatedly check the balance until it changes by 0.4 native tokens
       while (true) {
+        depositCheckTime++
         const newBalance = await L3Provider.getBalance(config.chainOwner)
         if (newBalance.sub(oldBalance).gte(ethers.utils.parseEther('0.4'))) {
           console.log(
-            'Balance of your account on appchain increased by 0.4 Ether.'
+            'Balance of your account on Orbit chain increased by the native token you have just sent.'
           )
           break
         }
+        let tooLongNotification = ''
+        if (depositCheckTime >= 6) {
+          tooLongNotification =
+            "(It is taking a long time. Did you change the config files? If you did, you will need to delete ./config/My Arbitrum L3 Chain, since this chain data is for your last config file. If you didn't change the file, please ignore this message.)"
+        }
         console.log(
-          'Balance not changed yet. Waiting for another 30 seconds ⏰⏰⏰⏰⏰⏰'
+          `Balance not changed yet. Waiting for another 30 seconds ⏰⏰⏰⏰⏰⏰ ${tooLongNotification}`
         )
         await delay(30 * 1000)
       }
-      rs.etherSent.deposit = true
+      rs.nativeTokenDeposit = true
     }
 
-    ////////////////////////////////
-    /// Token Bridge Deployment ///
-    //////////////////////////////
-    console.log(
-      'Running tokenBridgeDeployment script to deploy token bridge contracts on Arbitrum Goerli and your appchain 🌉🌉🌉🌉🌉'
-    )
-    await tokenBridgeDeployment(privateKey, L2_RPC_URL, L3_RPC_URL, rs)
-
+    if (!rs.tokenBridgeDeployed) {
+      ////////////////////////////////
+      /// Token Bridge Deployment ///
+      //////////////////////////////
+      console.log(
+        'Running tokenBridgeDeployment or erc20TokenBridge script to deploy token bridge contracts on parent chain and your Orbit chain 🌉🌉🌉🌉🌉'
+      )
+      await createERC20Bridge(L2_RPC_URL, privateKey, L3_RPC_URL, config.rollup)
+      rs.tokenBridgeDeployed = true
+    }
     ////////////////////////////////
     /// L3 Chain Configuration ///
     //////////////////////////////
-    console.log(
-      'Running l3Configuration script to configure your appchain 📝📝📝📝📝'
-    )
-    await l3Configuration(privateKey, L2_RPC_URL, L3_RPC_URL)
+    if (!rs.l3config) {
+      console.log(
+        'Running l3Configuration script to configure your Orbit chain 📝📝📝📝📝'
+      )
+      await l3Configuration(privateKey, L2_RPC_URL, L3_RPC_URL)
+      rs.l3config = true
+    }
+    ////////////////////////////////
+    /// Transfering ownership /////
+    //////////////////////////////
+    if (!rs.transferOwnership) {
+      console.log(
+        'Transferring ownership on L3, from rollup owner to upgrade executor 🔃🔃🔃'
+      )
+      await transferOwner(privateKey, L2Provider, L3Provider)
+      rs.transferOwnership = true
+    }
   } catch (error) {
     console.error('Error occurred:', error)
     const runtimeString = JSON.stringify(rs)
