@@ -41,7 +41,7 @@ async function main() {
   let configPath = process.env.CONFIG_PATH
 
   if (!configPath) {
-    configPath = '/home/azureuser/blockserve/chains' + CHAIN_ID + '/config'
+    configPath = '/home/azureuser/blockserve/chains/' + CHAIN_ID + '/config'
   }
 
   if (!privateKey || !L2_RPC_URL || !L3_RPC_URL || !CHAIN_ID) {
