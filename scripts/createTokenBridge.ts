@@ -166,9 +166,11 @@ export const createERC20Bridge = async (
   baseChainRpc: string,
   baseChainDeployerKey: string,
   childChainRpc: string,
-  rollupAddress: string
+  rollupAddress: string,
+  configPath: string
 ) => {
   console.log('Creating token bridge for rollup', rollupAddress)
+  const orbitSetupConfigPath = configPath + '/orbitSetupScriptConfig.json'
 
   const { l1Network, l2Network } = await createNewTokenBridge(
     baseChainRpc,
@@ -184,10 +186,7 @@ export const createERC20Bridge = async (
   console.log(NETWORK_FILE + ' updated')
 
   // Read the JSON configuration
-  const configRaw = fs.readFileSync(
-    './config/orbitSetupScriptConfig.json',
-    'utf-8'
-  )
+  const configRaw = fs.readFileSync(orbitSetupConfigPath, 'utf-8')
   const config: L3Config = JSON.parse(configRaw)
 
   const outputInfo = {

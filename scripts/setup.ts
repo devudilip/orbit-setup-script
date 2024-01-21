@@ -37,20 +37,26 @@ async function main() {
   const privateKey = process.env.PRIVATE_KEY
   const L2_RPC_URL = process.env.L2_RPC_URL
   const L3_RPC_URL = process.env.L3_RPC_URL
+  const CHAIN_ID = process.env.CHAIN_ID
+  let configPath = process.env.CONFIG_PATH
 
-  if (!privateKey || !L2_RPC_URL || !L3_RPC_URL) {
+  if (!configPath) {
+    configPath = '/home/azureuser/blockserve/chains' + CHAIN_ID + '/config'
+  }
+
+  if (!privateKey || !L2_RPC_URL || !L3_RPC_URL || !CHAIN_ID) {
     throw new Error('Required environment variable not found')
   }
 
+  const orbitSetupConfigPath = configPath + '/orbitSetupScriptConfig.json'
+  const resumeStatePath = configPath + '/resumeState.json'
+
   // Read the JSON configuration
-  const configRaw = fs.readFileSync(
-    './config/orbitSetupScriptConfig.json',
-    'utf-8'
-  )
+  const configRaw = fs.readFileSync(orbitSetupConfigPath, 'utf-8')
   const config: L3Config = JSON.parse(configRaw)
   let rs: RuntimeState
-  if (fs.existsSync('./config/resumeState.json')) {
-    const stateRaw = fs.readFileSync('./config/resumeState.json', 'utf-8')
+  if (fs.existsSync(resumeStatePath)) {
+    const stateRaw = fs.readFileSync(resumeStatePath, 'utf-8')
     rs = JSON.parse(stateRaw)
     //check integrity
     checkRuntimeStateIntegrity(rs)
@@ -123,7 +129,7 @@ async function main() {
         'Running Orbit Chain Native token deposit to Deposit ETH or native ERC20 token from parent chain to your account on Orbit chain ... 💰💰💰💰💰💰'
       )
       const oldBalance = await L3Provider.getBalance(config.chainOwner)
-      await ethOrERC20Deposit(privateKey, L2_RPC_URL)
+      await ethOrERC20Deposit(privateKey, L2_RPC_URL, configPath)
       let depositCheckTime = 0
 
       // Waiting for 30 secs to be sure that ETH/Native token deposited is received on L3
@@ -157,7 +163,13 @@ async function main() {
       console.log(
         'Running tokenBridgeDeployment or erc20TokenBridge script to deploy token bridge contracts on parent chain and your Orbit chain 🌉🌉🌉🌉🌉'
       )
-      await createERC20Bridge(L2_RPC_URL, privateKey, L3_RPC_URL, config.rollup)
+      await createERC20Bridge(
+        L2_RPC_URL,
+        privateKey,
+        L3_RPC_URL,
+        config.rollup,
+        configPath
+      )
       rs.tokenBridgeDeployed = true
     }
     ////////////////////////////////
@@ -167,7 +179,7 @@ async function main() {
       console.log(
         'Running l3Configuration script to configure your Orbit chain 📝📝📝📝📝'
       )
-      await l3Configuration(privateKey, L2_RPC_URL, L3_RPC_URL)
+      await l3Configuration(privateKey, L2_RPC_URL, L3_RPC_URL, configPath)
       rs.l3config = true
     }
     ////////////////////////////////
@@ -177,13 +189,13 @@ async function main() {
       console.log(
         'Transferring ownership on L3, from rollup owner to upgrade executor 🔃🔃🔃'
       )
-      await transferOwner(privateKey, L2Provider, L3Provider)
+      await transferOwner(privateKey, L2Provider, L3Provider, configPath)
       rs.transferOwnership = true
     }
   } catch (error) {
     console.error('Error occurred:', error)
     const runtimeString = JSON.stringify(rs)
-    fs.writeFileSync('./config/resumeState.json', runtimeString)
+    fs.writeFileSync(resumeStatePath, runtimeString)
     console.log(
       "Seems something went wrong during this process, but don't worry, we have recorded the deployed and initialized contracts into ./config/resumeState.json, next time you rerun the script, it will restart from where it failed "
     )

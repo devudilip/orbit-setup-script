@@ -11,7 +11,8 @@ const ARB_OWNER_ADDRESS = '0x0000000000000000000000000000000000000070'
 export async function transferOwner(
   privateKey: string,
   l2Provider: ethers.providers.JsonRpcProvider,
-  l3Provider: ethers.providers.JsonRpcProvider
+  l3Provider: ethers.providers.JsonRpcProvider,
+  configPath: string
 ) {
   //Generating l2 and l3 deployer signers from privatekey and providers
   const l3Deployer = getSigner(l3Provider, privateKey)
@@ -28,10 +29,8 @@ export async function transferOwner(
   }
 
   // Read the JSON configuration
-  const configRaw = fs.readFileSync(
-    './config/orbitSetupScriptConfig.json',
-    'utf-8'
-  )
+  const orbitSetupConfigPath = configPath + '/orbitSetupScriptConfig.json'
+  const configRaw = fs.readFileSync(orbitSetupConfigPath, 'utf-8')
   const config: L3Config = JSON.parse(configRaw)
 
   const L1AtomicTokenBridgeCreator__factory = new ethers.Contract(

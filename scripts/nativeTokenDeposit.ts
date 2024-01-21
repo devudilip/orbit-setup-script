@@ -4,12 +4,11 @@ import fs from 'fs'
 
 async function sendEthOrDepositERC20(
   erc20Inbox: ethers.Contract,
-  l2Signer: ethers.Wallet
+  l2Signer: ethers.Wallet,
+  configPath: string
 ) {
-  const configRaw = fs.readFileSync(
-    './config/orbitSetupScriptConfig.json',
-    'utf-8'
-  )
+  const orbitSetupConfigPath = configPath + '/orbitSetupScriptConfig.json'
+  const configRaw = fs.readFileSync(orbitSetupConfigPath, 'utf-8')
   const config = JSON.parse(configRaw)
   const nativeToken = config.nativeToken
   if (nativeToken === ethers.constants.AddressZero) {
@@ -59,19 +58,18 @@ async function sendEthOrDepositERC20(
 
 export async function ethOrERC20Deposit(
   privateKey: string,
-  L2_RPC_URL: string
+  L2_RPC_URL: string,
+  configPath: string
 ) {
   if (!privateKey || !L2_RPC_URL) {
     throw new Error('Required environment variable not found')
   }
+  const orbitSetupConfigPath = configPath + '/orbitSetupScriptConfig.json'
 
   const l2Provider = new ethers.providers.JsonRpcProvider(L2_RPC_URL)
   const l2Signer = new ethers.Wallet(privateKey).connect(l2Provider)
 
-  const configRaw = fs.readFileSync(
-    './config/orbitSetupScriptConfig.json',
-    'utf-8'
-  )
+  const configRaw = fs.readFileSync(orbitSetupConfigPath, 'utf-8')
   const config = JSON.parse(configRaw)
   const ERC20InboxAddress = config.inbox
 
@@ -81,5 +79,5 @@ export async function ethOrERC20Deposit(
     l2Signer
   )
 
-  await sendEthOrDepositERC20(erc20Inbox, l2Signer)
+  await sendEthOrDepositERC20(erc20Inbox, l2Signer, configPath)
 }

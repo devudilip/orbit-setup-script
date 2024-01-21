@@ -7,7 +7,8 @@ import fs from 'fs'
 export async function l3Configuration(
   privateKey: string,
   L2_RPC_URL: string,
-  L3_RPC_URL: string
+  L3_RPC_URL: string,
+  configPath: string
 ) {
   if (!privateKey || !L2_RPC_URL || !L3_RPC_URL) {
     throw new Error('Required environment variable not found')
@@ -22,10 +23,8 @@ export async function l3Configuration(
   const l3signer = new ethers.Wallet(privateKey).connect(L3Provider)
 
   // Read the JSON configuration
-  const configRaw = fs.readFileSync(
-    './config/orbitSetupScriptConfig.json',
-    'utf-8'
-  )
+  const orbitSetupConfigPath = configPath + '/orbitSetupScriptConfig.json'
+  const configRaw = fs.readFileSync(orbitSetupConfigPath, 'utf-8')
   const config: L3Config = JSON.parse(configRaw)
 
   // Reading params for L3 Configuration
